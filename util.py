@@ -1,6 +1,6 @@
 import numpy as np
-from typing import Literal
-from itertools import chain
+import itertools
+import random
 
 class MarkovChain:
     def __init__(self, pad=True, order=1):
@@ -8,6 +8,7 @@ class MarkovChain:
         self.transitions = {}
         self.states = set()
         self.pad = pad
+        self.generated_sequence = []
 
     def learn(self, sequences):
         for seq in sequences:
@@ -26,31 +27,29 @@ class MarkovChain:
             total = sum(next_states.values())
             self.probs[state] = {k: v/total for k, v in next_states.items()}
 
-    def get_next(self, current_state=None):
-        if current_state is None:
-            current_state = [None]*self.order
-        next_states = self.probs.get(tuple(current_state), {})
-        if not next_states:
-            print(f"Warning: State following {current_state} not found. Choosing random state.")
-            return np.random.choice(list(self.states))
-        return np.random.choice(list(next_states.keys()), p=list(next_states.values()))
+    def generate_next(self, current_state=None):
+        """
+        Generate the next state based on the current state.
 
-    def generate_sequence(self, start=None, length=10):
-        if start is None:
-            start = [None]*self.order
-        current = list(start)
-        sequence = list(current)
-        for _ in range(length):
-            next_state = None
-            while next_state is None:
-                next_state = self.get_next(current)
-                sequence.append(next_state)
-                current = sequence[-self.order:]
-        sequence = [s for s in sequence if s is not None]
-        return sequence
+        :param current_state:
+        :return:
+        """
+
+        # By default, use the last 'order' states from the generated sequence, padding None if necessary
+        if current_state is None:
+            current_state = self.generated_sequence[-min(self.order, len(self.generated_sequence)):]
+            while len(current_state) < self.order:
+                current_state.insert(0, None)
+        next_states = self.probs.get(tuple(current_state), {None: 1.0}) # if state not found, return end token
+        next_state = np.random.choice(list(next_states.keys()), p=list(next_states.values()))
+        if next_state is not None:
+            self.generated_sequence.append(next_state)
+            return next_state
+        else:
+            return self.generate_next([None]*self.order) # resample from start tokens if end token is reached (i.e. None)
 
 class BlockIterator:
-    def __init__(self, shape, block_size=1, axis=0, continue_from_end: Literal[True, False, 'zigzag']=False, start=None):
+    def __init__(self, shape, block_size=1, axis=0, pattern=None, seed=None):
         """
         Iterate over a 2D array in blocks along a specified axis.
 
@@ -58,7 +57,7 @@ class BlockIterator:
         :param start:
         :param block_size:
         :param axis:
-        :param direction:
+        :param zigzag:
         :param continue_from_end:
         """
 
@@ -66,64 +65,42 @@ class BlockIterator:
         self.block_size = block_size
         if shape[0] % block_size != 0 or shape[1] % block_size != 0:
             raise ValueError("shape[0] and shape[1] must be divisible by block_size")
-        if start is None:
-            start = [0]*len(shape)
-            if block_size < 0:
-                start[axis] = shape[axis] - block_size
-        self.curr = start
         self.axis = axis
-        self.continue_from_end = continue_from_end
+        self.pattern = pattern
+        if pattern == 'random' and seed is None:
+            seed = random.randint(0, 2 ** 32 - 1)
+        self.seed = seed
 
     def __iter__(self):
-        if not self.continue_from_end:
-            return self
-        if self.continue_from_end == 'zigzag':
-            self.curr[0 if self.axis == 1 else self.axis + 1] += self.block_size
-            next_iter = BlockIterator(self.shape, -self.block_size, self.axis, 'zigzag', self.curr)
-            return chain(self, next_iter)
+        x_start, x_end = 0, self.shape[0]
+        y_start, y_end = 0, self.shape[1]
+        if self.block_size < 0:
+            x_start, x_end = self.shape[0] - 1, -1
+            y_start, y_end = self.shape[1] - 1, -1
 
-        self.curr[0 if self.axis == 1 else self.axis + 1] += self.block_size
-        next_iter = BlockIterator(self.shape, self.block_size, self.axis, True, self.curr)
-        return chain(self, next_iter)
+        x = range(x_start, x_end, self.block_size)
+        y = range(y_start, y_end, self.block_size)
+        if self.axis == 1:
+            x, y = y, x
+        corners = list(itertools.product(x, y))
+        if self.pattern == 'random':
+            random.shuffle(corners)
+        return corners.__iter__()
 
-    def __next__(self):
-        if self.curr[self.axis] + self.block_size>= self.shape[self.axis] and self.block_size > 0:
-            raise StopIteration
-        self.curr[self.axis] += self.block_size
-        return self.curr.copy()
+    def copy(self):
+        return BlockIterator(self.shape, self.block_size, self.axis, self.pattern, self.seed)
 
-class RowColIterator(BlockIterator):
-    def __init__(self, shape, start=None, block_size=1, axis=0, direction: Literal[1, -1]=1):
-        """
-        Iterate over rows of a 2D array in blocks.
 
-        :param shape: shape of the array
-        :param start: starting position
-        :param block_size: size of each block
-        :param axis: 0 for rows, 1 for columns
-        :param direction: 1 for forward, -1 for backward
-        """
-        super().__init__(shape, start, block_size)
-        self.axis = axis
-        self.block_size = direction * self.block_size
-        if start is None:
-            self.curr[axis] = 0 if direction == 1 else shape[axis] - block_size
+class Block:
+    """
+    A hashable block of an image.
+    """
+    def __init__(self, arr: np.ndarray):
+        self.arr = arr
 
-def test_markov_chain():
-    test_file = 'test/mobydick.txt'
-    with open(test_file, 'r') as f:
-        sequence = []
-        for line in f:
-            sequence.extend(line.strip().split())
-    mc = MarkovChain(order=6)
-    mc.learn([sequence])
-    print(" ".join(mc.generate_sequence(length=100)))
+    def __hash__(self):
+        return hash(tuple(self.arr.flatten()))
 
-if __name__ == "__main__":
-    from PIL import Image
-    img = Image.new("RGB", (50, 100), color=(73, 109, 137))
-    test_array = np.array(img)
-    test_array[0, 0] = [255, 0, 0]
-    test_array[0, 1] = [0, 255, 0]
-    test_array[0, 2] = [0, 0, 255]
-    test_array[1, 0] = [255, 255, 0]
+    def __eq__(self, other):
+        return tuple(self.arr.flatten() == other.arr.flatten())
+
