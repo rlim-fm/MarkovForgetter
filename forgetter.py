@@ -10,6 +10,7 @@ Bugs: None known
 import argparse
 import cv2
 from util import MarkovChain, BlockIterator, Block
+import os
 
 
 class Forgetter:
@@ -24,7 +25,7 @@ class Forgetter:
             image_path: str: Path to the input image.
             **kwargs: {
                 'order': int: Order of the Markov Chain.
-                'arrangement': str: Arrangement pattern: row_left, row_right, col_up, col_down, random.
+                'arrangement': str: Arrangement pattern: 'row', 'random'.
                 'block_size': int: Size of the blocks to replace.
             }
         """
@@ -69,17 +70,15 @@ class Forgetter:
         """
         Initializes the BlockIterator based on the arrangement pattern.
         """
-        if self.arrangement == 'left':
-            self.iterator = BlockIterator(self.image.shape, self.block_size, axis=0)
-        elif self.arrangement == 'right':
-            self.iterator = BlockIterator(self.image.shape, -self.block_size, axis=0)
+        if self.arrangement == 'row':
+            self.iterator = BlockIterator(self.image.shape, self.block_size)
         elif self.arrangement == 'random':
             self.iterator = BlockIterator(self.image.shape, self.block_size, pattern='random')
         else:
             raise ValueError(f"Unknown arrangement: {self.arrangement}")
 
 
-    def forget(self):
+    def forget(self, show=False):
         """
         Iteratively replaces blocks of the image using the Markov Chain.
         """
@@ -87,8 +86,9 @@ class Forgetter:
             a, b, c, d = corner[0], corner[0] + self.block_size, corner[1], corner[1] + self.block_size
             block = self.markov_chain.generate_next()
             self.image[a:b, c:d, ...] = block.arr
-            cv2.imshow('image', self.image)
-            cv2.waitKey(1)
+            if show:
+                cv2.imshow('image', self.image)
+                cv2.waitKey(1)
 
     def save_image(self, path):
         """
@@ -106,14 +106,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--image_path', type=str, default='test/garkov_2.png', help='Path to the input image.')
     parser.add_argument('--order', type=int, default=5, help='Order of the Markov Chain.')
-    parser.add_argument('--arrangement', type=str, default='left', help='Arrangement pattern: left, right, random.')
+    parser.add_argument('--arrangement', type=str, default='left', help='Arrangement pattern: row, random.')
     parser.add_argument('--block_size', type=int, default=5, help='Size of the blocks to replace.')
-    parser.add_argument('--save_path', type=str, default=None, help='Path to save the output image.')
+    parser.add_argument('--save', action='store_true', help='Save the examples image.')
+    parser.add_argument('--show', action='store_true', help='Show animation of the regeneration.')
     args = parser.parse_args()
 
     forgetter = Forgetter(args.image_path, order=args.order, arrangement=args.arrangement, block_size=args.block_size)
-    forgetter.forget()
-    if args.save_path is not None:
-        forgetter.save_image(args.save_path)
+    forgetter.forget(args.show)
 
-    cv2.destroyAllWindows()
+    if args.save:
+        forgetter.save_image('examples/forgotten_' + os.path.basename(args.image_path))

@@ -76,7 +76,7 @@ class MarkovChain:
 
 
 class BlockIterator:
-    def __init__(self, shape, block_size=1, axis=0, pattern=None, seed=None):
+    def __init__(self, shape, block_size=1, pattern=None, seed=None):
         """
         An iterator that yields the top-left corner of each block in an image.
 
@@ -92,7 +92,6 @@ class BlockIterator:
         self.block_size = block_size
         if shape[0] % block_size != 0 or shape[1] % block_size != 0:
             raise ValueError("shape[0] and shape[1] must be divisible by block_size")
-        self.axis = axis
         self.pattern = pattern
         if pattern == 'random' and seed is None:
             seed = random.randint(0, 2 ** 32 - 1)
@@ -104,16 +103,12 @@ class BlockIterator:
         """
         x_start, x_end = 0, self.shape[0]
         y_start, y_end = 0, self.shape[1]
-        if self.block_size < 0:
-            x_start, x_end = self.shape[0] - 1, -1
-            y_start, y_end = self.shape[1] - 1, -1
 
         x = range(x_start, x_end, self.block_size)
         y = range(y_start, y_end, self.block_size)
-        if self.axis == 1:
-            x, y = y, x
         corners = list(itertools.product(x, y))
         if self.pattern == 'random':
+            random.seed(self.seed)
             random.shuffle(corners)
         return corners.__iter__()
 
@@ -121,13 +116,13 @@ class BlockIterator:
         """
         Creates a copy of the BlockIterator with the same parameters. Preserves the random seed if applicable.
         """
-        return BlockIterator(self.shape, self.block_size, self.axis, self.pattern, self.seed)
+        return BlockIterator(self.shape, self.block_size, self.pattern, self.seed)
 
     def __repr__(self):
-        return f"BlockIterator(shape={self.shape}, block_size={self.block_size}, axis={self.axis}, pattern={self.pattern}, seed={self.seed})"
+        return f"BlockIterator(shape={self.shape}, block_size={self.block_size}, pattern={self.pattern}, seed={self.seed})"
 
     def __str__(self):
-        arrangement = 'random' if self.pattern == 'random' else ('row' if self.axis == 0 else 'col')
+        arrangement = 'random' if self.pattern == 'random' else 'row'
         return f"BlockIterator({arrangement}, block_size={self.block_size})"
 
 
